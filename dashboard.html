@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Dashboard Température </title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #e0f7fa, #80deea);
+      margin: 0;
+      padding: 2rem;
+      color: #212121;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+    h1, h2 {
+      margin: 0.2rem 0;
+    }
+    h2 {
+      color: #00796b;
+      font-weight: 700;
+      font-size: 1.8rem;
+      text-align: center;
+    }
+    #temp {
+      font-size: 6rem;
+      font-weight: 800;
+      color: #d84315;
+      margin-bottom: 1rem;
+      text-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      min-width: 160px;
+      transition: color 0.4s ease;
+    }
+    #status {
+      font-style: italic;
+      font-size: 1rem;
+      color: #455a64;
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+    #connectionQuality {
+      font-size: 0.9rem;
+      margin-bottom: 2rem;
+      color: #00796b;
+      font-weight: 600;
+    }
+    #historyContainer {
+      width: 100%;
+      max-width: 600px;
+      background: #ffffffcc;
+      padding: 1rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+      margin-bottom: 2rem;
+    }
+    canvas {
+      width: 100% !important;
+      height: 300px !important;
+    }
+    footer {
+      margin-top: auto;
+      font-size: 1rem;
+      color: #555;
+      opacity: 0.8;
+      text-align: center;
+    }
+    /* Responsive */
+    @media (max-width: 480px) {
+      #temp {
+        font-size: 4rem;
+        min-width: auto;
+      }
+      body {
+        padding: 1rem;
+      }
+      #historyContainer {
+        padding: 0.5rem;
+      }
+    }
+
+  </style>
+</head>
+<body>
+  <h2>🌡️ Température actuelle :</h2>
+  <h1 id="temp">-- °C</h1>
+  <div id="status">Connexion au broker MQTT...</div>
+  <div id="connectionQuality">Qualité de connexion : <span id="qualityValue">N/A</span></div>
+
+  <div id="historyContainer">
+    <h2>Historique de température</h2>
+    <canvas id="tempChart"></canvas>
+  </div>
+
+
+  <script>
+    const mqttUrl = "wss://c30e0981878f46b08e205c50a221a9c8.s1.eu.hivemq.cloud:8884/mqtt";
+    const topic = "capteurs/temperature";
+
+    const client = mqtt.connect(mqttUrl, {
+      username: "hivemq.webclient.1763368507097",
+      password: "aelT&09WC1ZM.3:vxF@s"
+    });
+
+    const tempElem = document.getElementById("temp");
+    const statusElem = document.getElementById("status");
+    const qualityValueElem = document.getElementById("qualityValue");
+
+    let temperatures = [];
+    let labels = [];
+    const maxPoints = 20;
+
+    const ctx = document.getElementById('tempChart').getContext('2d');
+    const tempChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Température (°C)',
+          data: temperatures,
+          borderColor: '#d84315',
+          backgroundColor: 'rgba(216,67,21,0.2)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 4,
+          pointBackgroundColor: '#d84315',
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: {
+            suggestedMin: 15,
+            suggestedMax: 40
+          }
+        },
+        animation: {
+          duration: 500
+        },
+        plugins: {
+          legend: {
+            display: true,
+            labels: {
+              color: '#212121',
+              font: {size: 14, weight: 'bold'}
+            }
+          }
+        }
+      }
+    });
+
+    function updateTempColor(temp) {
+      if (temp < 20) {
+        tempElem.style.color = '#0288d1'; // Bleu froid
+      } else if (temp < 26) {
+        tempElem.style.color = '#388e3c'; // Vert confortable
+      } else if (temp < 32) {
+        tempElem.style.color = '#fbc02d'; // Jaune chaud
+      } else {
+        tempElem.style.color = '#d84315'; // Rouge chaud
+      }
+    }
+
+    function calculateConnectionQuality() {
+      if (client.connected) {
+        qualityValueElem.textContent = 'Bonne';
+        qualityValueElem.style.color = '#388e3c';
+      } else {
+        qualityValueElem.textContent = 'Mauvaise';
+        qualityValueElem.style.color = '#d84315';
+      }
+    }
+
+    client.on('connect', () => {
+      statusElem.innerText = 'Connecté au broker MQTT';
+      client.subscribe(topic, (err) => {
+        if (err) {
+          statusElem.innerText = "Erreur d'abonnement au topic";
+          console.error("Erreur d'abonnement au topic :", err);
+        } else {
+          statusElem.innerText = `Abonné au topic ${topic}`;
+          console.log("Abonné au topic", topic);
+        }
+      });
+      calculateConnectionQuality();
+    });
+
+    client.on('message', (topic, message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        if (data.temperature !== undefined) {
+          const temperature = data.temperature;
+          tempElem.innerText = `${temperature.toFixed(2)} °C`;
+          updateTempColor(temperature);
+
+          // Mise à jour de l'historique
+          const now = new Date();
+          if (temperatures.length >= maxPoints) {
+            temperatures.shift();
+            labels.shift();
+          }
+          temperatures.push(temperature);
+          labels.push(now.toLocaleTimeString());
+          tempChart.update();
+
+        } else {
+          console.warn("Temperature non trouvée dans le message :", data);
+        }
+      } catch (e) {
+        console.error("Erreur parsing message MQTT :", e);
+      }
+    });
+
+    client.on('error', (err) => {
+      statusElem.innerText = "Erreur MQTT, voir console";
+      console.error("Erreur MQTT:", err);
+      calculateConnectionQuality();
+    });
+
+    client.on('offline', () => {
+      statusElem.innerText = "Client MQTT hors ligne";
+      console.warn("Client MQTT hors ligne");
+      calculateConnectionQuality();
+    });
+
+    client.on('reconnect', () => {
+      statusElem.innerText = "Tentative de reconnexion...";
+      console.log("Tentative de reconnexion...");
+      calculateConnectionQuality();
+    });
+
+  </script>
+</body>
+</html>
